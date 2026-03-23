@@ -15,19 +15,26 @@ generation_config = {
     "max_output_tokens": 8192,
 }
 
-# Build the schema dynamically from the actual database
+# Cache the schema string (built lazily on first query)
+_cached_schema = None
+
 def _build_schema_string():
     """Reads the live SQLite schema and formats it for the LLM prompt."""
+    global _cached_schema
+    if _cached_schema:
+        return _cached_schema
     try:
         schema = database.get_schema()
         lines = []
         for table, cols in schema.items():
             lines.append(f"- {table} ({', '.join(cols)})")
-        return "\n".join(lines)
+        _cached_schema = "\n".join(lines)
+        return _cached_schema
     except Exception:
         return "(schema unavailable)"
 
-SQL_SYSTEM_PROMPT = f"""You are a SQL expert for an SAP Order-to-Cash (O2C) SQLite database.
+def _get_sql_system_prompt():
+    return f"""You are a SQL expert for an SAP Order-to-Cash (O2C) SQLite database.
 
 DATABASE SCHEMA (all available tables and their columns):
 {_build_schema_string()}
@@ -44,6 +51,7 @@ KEY RELATIONSHIPS (foreign key mappings):
 - journal_entry_items_accounts_receivable.referenceDocument -> billing_document_headers.billingDocument
 - payments_accounts_receivable.invoiceReference -> billing_document_headers.billingDocument (Payment links to Billing)
 - product_descriptions.product -> products.product (Product name/description)
+- billing_document_cancellations contains cancelled billing documents
 
 FLOW TRACE (Order-to-Cash pipeline):
 Sales Order -> Delivery -> Billing Document -> Journal Entry
@@ -57,7 +65,7 @@ BROKEN FLOW DEFINITIONS:
 
 RULES:
 1. Return ONLY a valid SQLite SQL query. No markdown, no explanations, no code fences.
-2. If the user's question is NOT about this dataset (e.g. general knowledge, creative writing, jokes, politics, weather), return exactly: GUARDRAIL: off-topic
+2. If the user's question is NOT about this dataset (e.g. general knowledge, creative writing, jokes, politics, weather, math problems unrelated to the data), return exactly: GUARDRAIL: off-topic
 3. Use LEFT JOINs for broken flow detection.
 4. Use DISTINCT when joining through items tables to avoid duplicates.
 5. Limit results to 50 rows unless the user asks for more.
@@ -70,7 +78,7 @@ Rules:
 1. Answer the user's question clearly using ONLY the provided data.
 2. Format numbers and dates nicely.
 3. If the data contains IDs, mention them so the user can cross-reference.
-4. Keep answers concise but thorough.
+4. Keep answers concise but thorough. Use bullet points or numbered lists for clarity.
 5. Do NOT fabricate any data not present in the results.
 6. Do NOT show raw SQL or JSON.
 """
@@ -78,7 +86,7 @@ Rules:
 def generate_sql(query: str) -> str:
     model = genai.GenerativeModel(
         'gemini-2.0-flash',
-        system_instruction=SQL_SYSTEM_PROMPT,
+        system_instruction=_get_sql_system_prompt(),
         generation_config=generation_config
     )
     response = model.generate_content(query)
@@ -132,12 +140,12 @@ def process_query(query: str) -> str:
         try:
             sql = generate_sql(retry_prompt)
             if "GUARDRAIL" in sql.upper() or not sql.strip().upper().startswith("SELECT"):
-                return f"Sorry, I couldn't generate a valid query for your question."
+                return "Sorry, I couldn't generate a valid query for your question."
             results = database.run_query(sql)
             if isinstance(results, dict) and "error" in results:
                 return f"Sorry, I encountered a persistent database error: {results['error']}"
         except Exception:
-            return f"Sorry, I couldn't process your question."
+            return "Sorry, I couldn't process your question."
         
     if not results:
         return "The query returned no results from the database. Try rephrasing your question."

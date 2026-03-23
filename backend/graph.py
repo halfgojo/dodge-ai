@@ -1,7 +1,9 @@
 import sqlite3
 import networkx as nx
+import os
 
-DB_PATH = "sqlite.db"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "sqlite.db")
 
 def build_graph():
     """Builds a NetworkX directed graph from the SQLite database."""
@@ -79,7 +81,6 @@ def build_graph():
         inv_id = str(row['billingDocument'])
         ref_id = str(row['referenceSdDocument'])
         if inv_id and ref_id:
-            # referenceSdDocument could be delivery or sales order
             if f"DEL-{ref_id}" in G:
                 G.add_edge(f"DEL-{ref_id}", f"INV-{inv_id}", label="TRIGGERS")
             elif f"SO-{ref_id}" in G:
