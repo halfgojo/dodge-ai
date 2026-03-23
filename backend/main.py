@@ -1,3 +1,10 @@
+import os
+from dotenv import load_dotenv
+
+# Load .env from project root
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env'))
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
