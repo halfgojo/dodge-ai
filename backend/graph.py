@@ -10,65 +10,108 @@ def build_graph():
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
-    # helper
     def query(sql):
         try:
             cursor.execute(sql)
             return [dict(row) for row in cursor.fetchall()]
-        except sqlite3.Error:
+        except sqlite3.Error as e:
+            print(f"  SQL Error: {e}")
             return []
 
+    # --- Customers ---
     print("Loading Customers...")
-    for row in query("SELECT businessPartner, customer, businessPartnerFullName FROM business_partners LIMIT 100"):
-        cid = str(row['customer'])
-        G.add_node(f"CUST-{cid}", type="Customer", label=row['businessPartnerFullName'] or cid, raw=row)
+    for row in query("SELECT businessPartner, customer, businessPartnerFullName, businessPartnerCategory FROM business_partners"):
+        cid = str(row['customer'] or row['businessPartner'])
+        G.add_node(f"CUST-{cid}", type="Customer", label=row['businessPartnerFullName'] or f"Customer {cid}", raw=row)
 
+    # --- Products ---
+    print("Loading Products...")
+    for row in query("""
+        SELECT p.product, pd.productDescription, p.productType, p.productGroup, p.baseUnit, p.division
+        FROM products p
+        LEFT JOIN product_descriptions pd ON p.product = pd.product AND pd.language = 'EN'
+    """):
+        pid = str(row['product'])
+        desc = row['productDescription'] or f"Product {pid}"
+        G.add_node(f"PROD-{pid}", type="Product", label=desc, raw=row)
+
+    # --- Sales Orders ---
     print("Loading Sales Orders...")
-    for row in query("SELECT salesOrder, soldToParty, totalNetAmount, transactionCurrency, creationDate FROM sales_order_headers LIMIT 200"):
+    for row in query("SELECT salesOrder, soldToParty, totalNetAmount, transactionCurrency, creationDate, overallDeliveryStatus, overallOrdReltdBillgStatus FROM sales_order_headers"):
         so_id = str(row['salesOrder'])
-        G.add_node(f"SO-{so_id}", type="SalesOrder", label=f"Order {so_id}", raw=row)
+        G.add_node(f"SO-{so_id}", type="SalesOrder", label=f"SO {so_id}", raw=row)
         customer_id = str(row['soldToParty'])
-        if customer_id:
+        if customer_id and f"CUST-{customer_id}" in G:
             G.add_edge(f"CUST-{customer_id}", f"SO-{so_id}", label="PLACED")
 
+    # --- Sales Order Items -> Product edges ---
+    print("Loading Sales Order Items...")
+    for row in query("SELECT salesOrder, salesOrderItem, material, netAmount, requestedQuantity FROM sales_order_items"):
+        so_id = str(row['salesOrder'])
+        mat_id = str(row['material'])
+        item_id = f"SOI-{so_id}-{row['salesOrderItem']}"
+        G.add_node(item_id, type="SalesOrderItem", label=f"Item {row['salesOrderItem']}", raw=row)
+        G.add_edge(f"SO-{so_id}", item_id, label="CONTAINS")
+        if mat_id and f"PROD-{mat_id}" in G:
+            G.add_edge(item_id, f"PROD-{mat_id}", label="REFERENCES")
+
+    # --- Deliveries ---
     print("Loading Deliveries...")
-    for row in query("SELECT deliveryDocument, creationDate, overallGoodsMovementStatus FROM outbound_delivery_headers LIMIT 200"):
+    for row in query("SELECT deliveryDocument, creationDate, overallGoodsMovementStatus, overallPickingStatus, shippingPoint FROM outbound_delivery_headers"):
         del_id = str(row['deliveryDocument'])
         G.add_node(f"DEL-{del_id}", type="Delivery", label=f"Del {del_id}", raw=row)
     
-    # Map SO -> Delivery from outbound_delivery_items
-    for row in query("SELECT deliveryDocument, referenceSdDocument FROM outbound_delivery_items LIMIT 500"):
+    # Map SO -> Delivery from delivery items
+    for row in query("SELECT DISTINCT deliveryDocument, referenceSdDocument FROM outbound_delivery_items"):
         del_id = str(row['deliveryDocument'])
         so_id = str(row['referenceSdDocument'])
-        if so_id and del_id:
+        if so_id and del_id and f"SO-{so_id}" in G and f"DEL-{del_id}" in G:
             G.add_edge(f"SO-{so_id}", f"DEL-{del_id}", label="FULFILLED_BY")
             
-    print("Loading Invoices...")
-    for row in query("SELECT billingDocument, totalNetAmount, transactionCurrency, creationDate FROM billing_document_headers LIMIT 200"):
+    # --- Billing / Invoices ---
+    print("Loading Billing Documents...")
+    for row in query("SELECT billingDocument, billingDocumentType, totalNetAmount, transactionCurrency, creationDate, billingDocumentIsCancelled, soldToParty, companyCode, fiscalYear, accountingDocument FROM billing_document_headers"):
         inv_id = str(row['billingDocument'])
         G.add_node(f"INV-{inv_id}", type="Invoice", label=f"Inv {inv_id}", raw=row)
         
-    # Map Delivery -> Invoice from billing_document_items
-    for row in query("SELECT billingDocument, referenceSdDocument FROM billing_document_items LIMIT 500"):
+    # Map Delivery -> Invoice from billing items
+    for row in query("SELECT DISTINCT billingDocument, referenceSdDocument FROM billing_document_items"):
         inv_id = str(row['billingDocument'])
-        del_id = str(row['referenceSdDocument']) # which might be the delivery doc
-        if inv_id and del_id:
-            G.add_edge(f"DEL-{del_id}", f"INV-{inv_id}", label="TRIGGERS")
+        ref_id = str(row['referenceSdDocument'])
+        if inv_id and ref_id:
+            # referenceSdDocument could be delivery or sales order
+            if f"DEL-{ref_id}" in G:
+                G.add_edge(f"DEL-{ref_id}", f"INV-{inv_id}", label="TRIGGERS")
+            elif f"SO-{ref_id}" in G:
+                G.add_edge(f"SO-{ref_id}", f"INV-{inv_id}", label="BILLED_FROM")
             
+    # --- Journal Entries ---
     print("Loading Journal Entries...")
-    for row in query("SELECT accountingDocument, referenceDocument, amountInCompanyCodeCurrency, postingDate FROM journal_entry_items_accounts_receivable LIMIT 200"):
+    seen_je = set()
+    for row in query("SELECT accountingDocument, companyCode, fiscalYear, referenceDocument, glAccount, amountInCompanyCodeCurrency, postingDate, customer FROM journal_entry_items_accounts_receivable"):
         je_id = str(row['accountingDocument'])
-        G.add_node(f"JE-{je_id}", type="JournalEntry", label=f"JE {je_id}", raw=row)
-        inv_id = str(row['referenceDocument']) # Usually maps to billing document
-        if inv_id and je_id:
-            G.add_edge(f"INV-{inv_id}", f"JE-{je_id}", label="RECORDED_IN")
+        if je_id not in seen_je:
+            G.add_node(f"JE-{je_id}", type="JournalEntry", label=f"JE {je_id}", raw=row)
+            seen_je.add(je_id)
+        ref_id = str(row['referenceDocument'])
+        if ref_id and f"INV-{ref_id}" in G:
+            G.add_edge(f"INV-{ref_id}", f"JE-{je_id}", label="RECORDED_IN")
+
+    # --- Payments ---
+    print("Loading Payments...")
+    seen_pay = set()
+    for row in query("SELECT accountingDocument, customer, amountInTransactionCurrency, transactionCurrency, postingDate, invoiceReference FROM payments_accounts_receivable"):
+        pay_id = str(row['accountingDocument'])
+        if pay_id not in seen_pay:
+            G.add_node(f"PAY-{pay_id}", type="Payment", label=f"Pay {pay_id}", raw=row)
+            seen_pay.add(pay_id)
+        inv_ref = str(row['invoiceReference'])
+        if inv_ref and f"INV-{inv_ref}" in G:
+            G.add_edge(f"INV-{inv_ref}", f"PAY-{pay_id}", label="SETTLED_BY")
 
     conn.close()
     
-    # Post-process: Remove nodes with 0 degree to keep UI clean if desired, or keep all.
-    # isolated = list(nx.isolates(G))
-    # G.remove_nodes_from(isolated)
-    
+    print(f"Graph built: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
     return G
 
 def get_graph_data(G):
@@ -79,7 +122,6 @@ def get_graph_data(G):
     for node, data in G.nodes(data=True):
         clean_data = data.copy()
         raw = clean_data.pop("raw", {})
-        # Merge properties to root
         merged = {**clean_data, **raw}
         merged["id"] = node
         nodes.append(merged)
@@ -95,4 +137,3 @@ def get_graph_data(G):
 
 if __name__ == "__main__":
     G = build_graph()
-    print(f"Graph constructed with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges.")

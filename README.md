@@ -1,23 +1,111 @@
-# Order-to-Cash AI Graph Query System
+# Dodge AI — Order-to-Cash Context Graph System
 
-## Overview
-This project unifies a fragmented Order-to-Cash dataset (Sales Orders, Deliveries, Invoices, Journal Entries) into an interconnected context graph system with a Google Gemini LLM-powered conversational interface. Users can explore the graph visually or ask complex, multi-hop natural language questions that are dynamically compiled to SQL, executed, and synthesized as grounded answers.
+An AI-powered graph exploration and query system that unifies fragmented SAP Order-to-Cash data into an interactive knowledge graph with natural language querying via Google Gemini.
 
-## Architecture Decisions
-- **Backend:** FastAPI (Python) was chosen for its asynchronous performance, automatic payload validation via Pydantic, and fast integration.
-- **Frontend:** React + Vite provides a fast, modern component-based UI. `react-force-graph-2d` handles the graph visualization, offering performant canvas rendering for hundreds of nodes and smooth physics simulations.
-- **Data Ingestion:** A Python pipeline reads the distributed JSONL files, serializes nested structures, and normalizes them into a SQLite database. NetworkX serves as the in-memory graph builder mapping foreign-keys to explicit edges.
+![Tech Stack](https://img.shields.io/badge/Backend-FastAPI-green) ![Frontend](https://img.shields.io/badge/Frontend-React%20+%20Vite-blue) ![LLM](https://img.shields.io/badge/LLM-Google%20Gemini-orange) ![DB](https://img.shields.io/badge/Database-SQLite-lightgrey)
 
-## Database Choice (SQLite + NetworkX)
-Rather than introducing the operational complexity of a dedicated Graph Database like Neo4j, this system uses **SQLite** for durable structured querying and **NetworkX** for in-memory graph generation. 
-- **Tradeoffs:** SQLite is highly portable, requires zero setup, and is excellent for LLM-generated SQL due to its widely understood SQL dialect. While Neo4j allows native Cypher graph-traversals, SQLite combined with standard SQL JOINs easily resolves the flow tracing required for this assigned dataset.
+## Features
+- **Interactive Graph Visualization** — Force-directed graph with 700+ nodes representing Customers, Sales Orders, Deliveries, Invoices, Journal Entries, Payments, and Products
+- **LLM-Powered Natural Language Queries** — Ask questions in plain English, get SQL-grounded answers
+- **Smart Guardrails** — Off-topic queries are cleanly rejected
+- **Node Inspector** — Click any node to see full metadata and connection count
+- **Suggested Queries** — Pre-built query templates to get started quickly
 
-## LLM Prompting Strategy (Gemini)
-The architecture uses a two-step "Retrieve & Summarize" prompting pattern:
-1. **NL -> SQL:** The LLM is provided with a strict schema definition and explicit contextual mapping rules (e.g., how to detect "broken flows"). It strictly generates a SQL query targeting the SQLite DB.
-2. **SQL Results -> NL:** After local execution, the raw JSON results are piped back into Gemini, instructing it to synthesize the extracted records into a natural language response. This ensures responses remain 100% grounded in accurate reporting data.
+## Architecture
 
-## Guardrails
-To prevent misuse, arbitrary knowledge retrieval, and prompt injection:
-- The SQL generator system prompt explicitly commands: "If the user's question is fundamentally not about this dataset or asks general knowledge questions, return exactly: GUARDRAIL: off-topic".
-- The backend intercepts this deterministic output syntax. If the guardrail tripwire is hit, it short-circuits the SQL compilation process and safely returns the fallback: *"This system is designed to answer questions related to the provided dataset only."*
+```
+┌─────────────────┐     ┌──────────────┐     ┌───────────────┐
+│   React + Vite  │────▶│  FastAPI      │────▶│  SQLite DB    │
+│   Force Graph   │◀────│  Python       │◀────│  (19 tables)  │
+│   Chat Panel    │     │  NetworkX     │     │               │
+└─────────────────┘     └──────┬───────┘     └───────────────┘
+                               │
+                        ┌──────▼───────┐
+                        │ Google Gemini│
+                        │ (NL → SQL)   │
+                        └──────────────┘
+```
+
+### LLM Prompting Strategy
+The system uses a **two-step Retrieve & Summarize** pattern:
+1. **NL → SQL**: Gemini receives the full database schema (all 19 tables with columns and relationship mappings) and generates a valid SQLite query. If the query fails, it retries once with error context.
+2. **SQL Results → NL**: Raw query results are sent back to Gemini for natural language summarization, ensuring all answers are 100% grounded in real data.
+
+### Database Choice: SQLite + NetworkX
+- **SQLite**: Zero-setup, portable, well-understood SQL dialect (ideal for LLM-generated queries)
+- **NetworkX**: In-memory graph for visualization — maps foreign keys to semantic edges
+- **Tradeoff**: Neo4j would enable native graph traversals but adds deployment complexity and cost
+
+### Guardrails
+- System prompt instructs the LLM to return `GUARDRAIL: off-topic` for non-dataset questions
+- Backend intercepts this token and returns a clean rejection message
+- Only `SELECT` queries are permitted — mutations are blocked at the application layer
+
+## Project Structure
+```
+dodge-ai/
+├── backend/
+│   ├── main.py              # FastAPI app with /graph, /chat, /health endpoints
+│   ├── database.py          # SQLite init and query execution
+│   ├── graph.py             # NetworkX graph construction
+│   ├── llm_agent.py         # Gemini NL-to-SQL pipeline with guardrails
+│   └── requirements.txt     # Python dependencies
+├── frontend/
+│   ├── src/
+│   │   ├── App.jsx           # Main app with loading/error states
+│   │   ├── main.jsx          # React entry point
+│   │   ├── index.css         # Premium dark theme CSS
+│   │   └── components/
+│   │       ├── GraphCanvas.jsx  # Force graph with custom canvas rendering
+│   │       └── ChatPanel.jsx    # Chat interface with suggested queries
+│   ├── index.html
+│   ├── package.json
+│   └── vite.config.js
+├── .env.example
+├── .gitignore
+└── README.md
+```
+
+## Setup & Running
+
+### Prerequisites
+- Python 3.10+
+- Node.js 18+
+- Google Gemini API Key ([Get one free](https://ai.google.dev))
+
+### Backend
+```bash
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Download the dataset
+pip install gdown
+gdown 1UqaLbFaveV-3MEuiUrzKydhKmkeC1iAL
+unzip sap-order-to-cash-dataset.zip
+
+# Set your API key
+export GEMINI_API_KEY="your_key_here"
+
+# Start the server
+python main.py
+```
+
+### Frontend
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open **http://localhost:5173** to use the application.
+
+## Example Queries
+| Query | What it tests |
+|-------|---------------|
+| "Which products have the most billing documents?" | Multi-table JOIN + aggregation |
+| "Trace the full flow of billing document 91150187" | End-to-end O2C flow trace |
+| "Find sales orders that were delivered but not billed" | Broken flow detection (LEFT JOIN) |
+| "What is the total revenue by customer?" | Aggregation across entities |
+| "Tell me a joke" | Guardrail rejection |
