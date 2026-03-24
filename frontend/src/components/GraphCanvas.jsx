@@ -46,13 +46,13 @@ export default function GraphCanvas({ graphData }) {
   const nodeCanvasObject = useCallback((node, ctx, globalScale) => {
     const isSelected = selectedNode && node.id === selectedNode.id;
     const color = TYPE_COLORS[node.type] || '#94a3b8';
-    const size = isSelected ? 6 : 3.5;
+    const size = isSelected ? 10 : 5;
     
     // Glow for selected
     if (isSelected) {
       ctx.beginPath();
-      ctx.arc(node.x, node.y, size + 5, 0, 2 * Math.PI);
-      ctx.fillStyle = color + '25';
+      ctx.arc(node.x, node.y, size + 6, 0, 2 * Math.PI);
+      ctx.fillStyle = color + '30';
       ctx.fill();
     }
 
@@ -83,7 +83,7 @@ export default function GraphCanvas({ graphData }) {
     }).length;
   }, [selectedNode, graphData.links]);
 
-  const excludedKeys = new Set(['id', 'x', 'y', 'vx', 'vy', 'index', 'type', 'label', '__indexColor']);
+  const excludedKeys = new Set(['id', 'x', 'y', 'vx', 'vy', 'fx', 'fy', 'index', 'type', 'label', '__indexColor']);
 
   const legendItems = useMemo(() => {
     const types = new Set(graphData.nodes.map(n => n.type));
@@ -108,11 +108,11 @@ export default function GraphCanvas({ graphData }) {
           ctx.fillStyle = color;
           ctx.fill();
         }}
-        linkColor={() => 'rgba(74, 144, 217, 0.15)'}
-        linkWidth={0.8}
-        linkDirectionalArrowLength={3}
+        linkColor={() => 'rgba(74, 144, 217, 0.25)'}
+        linkWidth={1.5}
+        linkDirectionalArrowLength={4}
         linkDirectionalArrowRelPos={1}
-        linkDirectionalArrowColor={() => 'rgba(74, 144, 217, 0.3)'}
+        linkDirectionalArrowColor={() => 'rgba(74, 144, 217, 0.4)'}
         onNodeClick={handleNodeClick}
         onBackgroundClick={handleBackgroundClick}
         enableNodeDrag={true}
@@ -141,14 +141,25 @@ export default function GraphCanvas({ graphData }) {
             {selectedNode.label}
           </div>
           <div className="node-props">
+            <div className="node-prop">
+              <div className="prop-key">Entity</div>
+              <div className="prop-val">{selectedNode.type}</div>
+            </div>
             {Object.entries(selectedNode)
               .filter(([key]) => !excludedKeys.has(key))
-              .map(([key, val]) => (
-                <div className="node-prop" key={key}>
-                  <div className="prop-key">{key}</div>
-                  <div className="prop-val">{val === null || val === undefined ? '—' : typeof val === 'object' ? JSON.stringify(val) : String(val)}</div>
-                </div>
-              ))}
+              .map(([key, val]) => {
+                const displayVal = val === null || val === undefined || val === ''
+                  ? '—'
+                  : typeof val === 'object'
+                  ? JSON.stringify(val)
+                  : String(val);
+                return (
+                  <div className="node-prop" key={key}>
+                    <div className="prop-key">{key}</div>
+                    <div className="prop-val">{displayVal}</div>
+                  </div>
+                );
+              })}
           </div>
           <div className="connections-badge">
             Connections: {nodeConnections}
