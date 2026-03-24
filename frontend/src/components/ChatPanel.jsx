@@ -27,14 +27,26 @@ export default function ChatPanel() {
     
     const userMsg = text.trim();
     setInput('');
-    setMessages(prev => [...prev, { role: 'user', text: userMsg }]);
+    
+    // Create new message array for UI
+    const newMessages = [...messages, { role: 'user', text: userMsg }];
+    setMessages(newMessages);
     setLoading(true);
 
     try {
-      const res = await axios.post(`${API_BASE}/chat`, { message: userMsg });
-      setMessages(prev => [...prev, { role: 'bot', text: res.data.reply }]);
+      // Map history for the API (exclude the welcome message to save tokens)
+      const apiHistory = messages.slice(1).map(m => ({
+        role: m.role === 'bot' ? 'assistant' : 'user',
+        content: m.text
+      }));
+      
+      const res = await axios.post(`${API_BASE}/chat`, { 
+        message: userMsg,
+        history: apiHistory
+      });
+      setMessages([...newMessages, { role: 'bot', text: res.data.reply }]);
     } catch (err) {
-      setMessages(prev => [...prev, { role: 'bot', text: '⚠️ Could not connect to the backend.' }]);
+      setMessages([...newMessages, { role: 'bot', text: '⚠️ Could not connect to the backend.' }]);
     } finally {
       setLoading(false);
     }

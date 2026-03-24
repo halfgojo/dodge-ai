@@ -49,8 +49,11 @@ def get_graph_stats():
         "node_types": type_counts,
     }
 
+from typing import List, Dict, Optional
+
 class ChatRequest(BaseModel):
     message: str
+    history: Optional[List[Dict[str, str]]] = None
 
 class ChatResponse(BaseModel):
     reply: str
@@ -59,7 +62,7 @@ class ChatResponse(BaseModel):
 @app.post("/chat", response_model=ChatResponse)
 def chat_endpoint(req: ChatRequest):
     try:
-        reply = llm_agent.process_query(req.message)
+        reply = llm_agent.process_query(req.message, req.history)
         return ChatResponse(reply=reply)
     except Exception as e:
         return ChatResponse(reply=f"An error occurred: {str(e)}", status="error")

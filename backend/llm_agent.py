@@ -67,15 +67,17 @@ BROKEN FLOWS:
 RULES:
 1. Return ONLY a valid SQLite SQL query. No markdown, no explanations, no code fences.
 2. If NOT about this dataset, return exactly: GUARDRAIL: off-topic
-3. Use LEFT JOINs for broken flow detection.
-4. DO NOT join header tables directly to each other! You MUST join through the items tables (e.g. sales_order_items, outbound_delivery_items, billing_document_items) using the reference document columns.
-5. Use DISTINCT when joining through items tables to avoid duplicates.
-6. Limit results to 50 rows unless asked for more.
-7. For product names, JOIN product_descriptions WHERE language = 'EN'.
+3. If the user is asking a follow-up question that can be answered using the conversation history (like "explain these" or "why"), return exactly: FOLLOWUP
+4. Use LEFT JOINs for broken flow detection.
+5. DO NOT join header tables directly to each other! You MUST join through the items tables (e.g. sales_order_items, outbound_delivery_items, billing_document_items) using the reference document columns.
+6. Use DISTINCT when joining through items tables to avoid duplicates.
+7. Limit results to 50 rows unless asked for more.
+8. For product names, JOIN product_descriptions WHERE language = 'EN'.
 """
 
 SUMMARY_SYSTEM_PROMPT = """You are a data analyst presenting results from an SAP Order-to-Cash database.
 Answer clearly using ONLY the provided data. Format numbers/dates nicely. Use bullet points.
+CRITICAL: If there is a long sequential list of IDs (e.g., sales orders, deliveries), you MUST condense them into a range (e.g., '740506 to 740555') instead of listing every single one.
 Do NOT fabricate data. Do NOT show raw SQL or JSON."""
 
 
@@ -124,8 +126,12 @@ def _call_llm(system_prompt: str, user_prompt: str) -> str:
         raise RuntimeError("No LLM provider configured")
 
 
-def generate_sql(query: str) -> str:
-    sql = _call_llm(_get_sql_system_prompt(), query)
+def generate_sql(query: str, history_context: str = "") -> str:
+    prompt = _get_sql_system_prompt()
+    if history_context:
+        prompt += f"\n\nCONVERSATION HISTORY:\n{history_context}"
+        
+    sql = _call_llm(prompt, query)
     sql = re.sub(r'^```(?:sql)?\s*', '', sql)
     sql = re.sub(r'\s*```$', '', sql)
     return sql.strip()
@@ -143,14 +149,24 @@ Summarize these results in a clear, helpful natural language answer."""
     return _call_llm(SUMMARY_SYSTEM_PROMPT, prompt)
 
 
-def process_query(query: str) -> str:
+def process_query(query: str, history: list = None) -> str:
     if not LLM_PROVIDER:
         return "⚠️ No LLM configured. Set GROQ_API_KEY (free at console.groq.com) or GEMINI_API_KEY (free at ai.google.dev)."
 
+    history_context = ""
+    if history:
+        # Take up to last 4 messages for context
+        recent = history[-4:]
+        history_context = "\n".join([f"{msg.get('role', 'user').capitalize()}: {msg.get('content', '')}" for msg in recent])
+
     try:
-        sql = generate_sql(query)
+        sql = generate_sql(query, history_context)
     except Exception as e:
         return f"Sorry, I had trouble understanding your question. Error: {str(e)}"
+
+    if "FOLLOWUP" in sql.upper() and history_context:
+        prompt = f"Previous Conversation:\n{history_context}\n\nNew User Question: {query}\n\nAnswer the user's question clearly based on the previous conversation data."
+        return _call_llm(SUMMARY_SYSTEM_PROMPT, prompt)
 
     if "GUARDRAIL" in sql.upper():
         return "🚫 This system answers questions about the Order-to-Cash dataset only. Ask about sales orders, deliveries, billing, payments, or products."
@@ -163,7 +179,7 @@ def process_query(query: str) -> str:
     if isinstance(results, dict) and "error" in results:
         retry_prompt = f"The SQL query failed with error: {results['error']}. Original question: {query}. Generate a corrected SQL query."
         try:
-            sql = generate_sql(retry_prompt)
+            sql = generate_sql(retry_prompt, history_context)
             if "GUARDRAIL" in sql.upper() or not sql.strip().upper().startswith("SELECT"):
                 return "Sorry, I couldn't generate a valid query for your question."
             results = database.run_query(sql)
