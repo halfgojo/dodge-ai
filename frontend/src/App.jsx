@@ -28,13 +28,13 @@ function App() {
     return (
       <div style={{ 
         display: 'flex', alignItems: 'center', justifyContent: 'center', 
-        height: '100vh', background: '#0a0e17', color: '#6366f1', fontSize: '1.1rem',
-        fontFamily: 'Inter, sans-serif', flexDirection: 'column', gap: '16px'
+        height: '100vh', background: '#f7f9fc', color: '#4a90d9', fontSize: '1rem',
+        fontFamily: 'Inter, sans-serif', flexDirection: 'column', gap: '12px'
       }}>
-        <div className="typing-dots" style={{ display: 'flex', gap: '6px' }}>
-          <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#6366f1', animation: 'bounce 1.4s ease-in-out infinite' }} />
-          <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#6366f1', animation: 'bounce 1.4s ease-in-out 0.16s infinite' }} />
-          <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#6366f1', animation: 'bounce 1.4s ease-in-out 0.32s infinite' }} />
+        <div style={{ display: 'flex', gap: '5px' }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4a90d9', animation: 'bounce 1.4s ease-in-out infinite' }} />
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4a90d9', animation: 'bounce 1.4s ease-in-out 0.16s infinite' }} />
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4a90d9', animation: 'bounce 1.4s ease-in-out 0.32s infinite' }} />
         </div>
         Loading Graph...
       </div>
@@ -45,8 +45,8 @@ function App() {
     return (
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        height: '100vh', background: '#0a0e17', color: '#ef4444', fontSize: '1rem',
-        fontFamily: 'Inter, sans-serif', flexDirection: 'column', gap: '12px', padding: '40px'
+        height: '100vh', background: '#f7f9fc', color: '#e06060', fontSize: '0.95rem',
+        fontFamily: 'Inter, sans-serif', flexDirection: 'column', gap: '10px', padding: '40px'
       }}>
         <span style={{ fontSize: '2rem' }}>⚠️</span>
         {error}
