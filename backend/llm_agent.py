@@ -68,9 +68,10 @@ RULES:
 1. Return ONLY a valid SQLite SQL query. No markdown, no explanations, no code fences.
 2. If NOT about this dataset, return exactly: GUARDRAIL: off-topic
 3. Use LEFT JOINs for broken flow detection.
-4. Use DISTINCT when joining through items tables.
-5. Limit results to 50 rows unless asked for more.
-6. For product names, JOIN product_descriptions WHERE language = 'EN'.
+4. DO NOT join header tables directly to each other! You MUST join through the items tables (e.g. sales_order_items, outbound_delivery_items, billing_document_items) using the reference document columns.
+5. Use DISTINCT when joining through items tables to avoid duplicates.
+6. Limit results to 50 rows unless asked for more.
+7. For product names, JOIN product_descriptions WHERE language = 'EN'.
 """
 
 SUMMARY_SYSTEM_PROMPT = """You are a data analyst presenting results from an SAP Order-to-Cash database.
